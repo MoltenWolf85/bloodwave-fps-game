@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BLOODWAVE FPS</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+    #canvas { display: block; width: 100vw; height: 100vh; }
+
+    /* HUD */
+    #hud {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 10;
+    }
+
+    /* Crosshair */
+    #crosshair {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px; height: 20px;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: rgba(255,255,255,0.85);
+    }
+    #crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+    #crosshair::after  { width: 100%; height: 2px; top: 50%; transform: translateY(-50%); }
+    .crosshair-dot {
+      position: absolute; top: 50%; left: 50%;
+      width: 3px; height: 3px; background: #ff4444;
+      border-radius: 50%; transform: translate(-50%, -50%);
+    }
+
+    /* Health Bar */
+    #health-container {
+      position: absolute; bottom: 30px; left: 30px;
+    }
+    #health-label {
+      color: #aaa; font-size: 11px; letter-spacing: 3px;
+      text-transform: uppercase; margin-bottom: 5px;
+    }
+    #health-bar-bg {
+      width: 200px; height: 10px; background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.2); border-radius: 2px;
+    }
+    #health-bar {
+      height: 100%; width: 100%; border-radius: 2px;
+      background: linear-gradient(90deg, #22c55e, #86efac);
+      transition: width 0.2s ease, background 0.3s ease;
+    }
+    #health-value {
+      color: #fff; font-size: 13px; margin-top: 4px; letter-spacing: 1px;
+    }
+
+    /* Ammo */
+    #ammo-container {
+      position: absolute; bottom: 30px; right: 30px; text-align: right;
+    }
+    #ammo-label {
+      color: #aaa; font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
+    }
+    #weapon-name {
+      color: #f59e0b; font-size: 13px; letter-spacing: 2px;
+      text-transform: uppercase; margin-bottom: 2px;
+    }
+    #ammo-value {
+      color: #fff; font-size: 36px; font-weight: bold; line-height: 1;
+      letter-spacing: 2px;
+    }
+    #ammo-reserve { color: #888; font-size: 14px; }
+
+    /* Weapon slots */
+    #weapon-slots {
+      position: absolute; bottom: 115px; right: 30px;
+      display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+    }
+    .weapon-slot {
+      color: #555; font-size: 11px; letter-spacing: 2px;
+      text-transform: uppercase;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.08);
+      padding: 3px 8px;
+      border-radius: 2px;
+      transition: all 0.15s ease;
+    }
+    .weapon-slot .slot-key {
+      color: #444; margin-right: 5px;
+    }
+    .weapon-slot.active {
+      color: #f59e0b;
+      border-color: rgba(245, 158, 11, 0.5);
+      background: rgba(245, 158, 11, 0.1);
+    }
+    .weapon-slot.active .slot-key {
+      color: #f59e0b;
+    }
+
+    /* Wave */
+    #wave-container {
+      position: absolute; top: 25px; left: 50%; transform: translateX(-50%);
+      text-align: center;
+    }
+    #wave-label { color: #aaa; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; }
+    #wave-number { color: #f59e0b; font-size: 28px; font-weight: bold; letter-spacing: 4px; }
+    #enemy-count { color: #ef4444; font-size: 13px; letter-spacing: 2px; }
+
+    /* Score / KillFeed */
+    #score-container {
+      position: absolute; top: 25px; right: 30px; text-align: right;
+    }
+    #score-label { color: #aaa; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; }
+    #score-value { color: #fff; font-size: 22px; font-weight: bold; }
+
+    /* Hit indicator */
+    #hit-indicator {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 60px; height: 60px;
+      border: 2px solid #ef4444; border-radius: 50%;
+      opacity: 0; transition: opacity 0.1s;
+    }
+
+    /* Damage vignette */
+    #damage-vignette {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: radial-gradient(ellipse at center, transparent 60%, rgba(220,38,38,0.5) 100%);
+      opacity: 0; transition: opacity 0.3s;
+    }
+
+    /* Sprint indicator */
+    #sprint-indicator {
+      position: absolute; bottom: 80px; left: 30px;
+      color: #60a5fa; font-size: 11px; letter-spacing: 2px;
+      text-transform: uppercase; opacity: 0; transition: opacity 0.2s;
+    }
+
+    /* Wave announcement */
+    #wave-announce {
+      position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+      text-align: center; opacity: 0; pointer-events: none;
+      transition: opacity 0.5s;
+    }
+    #wave-announce-text {
+      color: #f59e0b; font-size: 48px; font-weight: bold;
+      letter-spacing: 6px; text-shadow: 0 0 20px rgba(245,158,11,0.8);
+    }
+    #wave-announce-sub {
+      color: #fcd34d; font-size: 16px; letter-spacing: 4px; margin-top: 5px;
+    }
+
+    /* Reload indicator */
+    #reload-bar-container {
+      position: absolute; bottom: 65px; right: 30px;
+      text-align: right; opacity: 0; transition: opacity 0.2s;
+    }
+    #reload-label { color: #f59e0b; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 4px; }
+    #reload-bar-bg { width: 150px; height: 4px; background: rgba(255,255,255,0.15); border-radius: 2px; margin-left: auto; }
+    #reload-bar { height: 100%; width: 0%; background: #f59e0b; border-radius: 2px; transition: width 0.05s linear; }
+
+    /* Overlay screens */
+    .overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 100; background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(4px);
+    }
+    .overlay-title {
+      font-size: 64px; font-weight: bold; letter-spacing: 10px;
+      text-transform: uppercase; margin-bottom: 10px;
+    }
+    .overlay-sub { color: #aaa; font-size: 14px; letter-spacing: 4px; margin-bottom: 40px; }
+    .overlay-btn {
+      padding: 14px 40px; border: 2px solid currentColor;
+      background: transparent; cursor: pointer; font-family: 'Courier New', monospace;
+      font-size: 14px; letter-spacing: 4px; text-transform: uppercase;
+      transition: all 0.2s; margin: 8px;
+    }
+    .overlay-btn:hover { background: currentColor; }
+    .overlay-btn:hover span { color: #000; }
+    .overlay-btn span { transition: color 0.2s; }
+
+    #start-screen .overlay-title { color: #f59e0b; }
+    #start-screen .overlay-btn { color: #f59e0b; }
+    #start-screen .controls-info {
+      color: #666; font-size: 12px; letter-spacing: 2px; line-height: 2;
+      text-align: center; border-top: 1px solid #333; padding-top: 20px; margin-top: 10px;
+    }
+
+    #gameover-screen { display: none; }
+    #gameover-screen .overlay-title { color: #ef4444; }
+    #gameover-screen .overlay-btn { color: #ef4444; }
+    #gameover-stats { color: #aaa; font-size: 13px; letter-spacing: 2px; line-height: 2.2; text-align: center; margin-bottom: 30px; }
+    #gameover-stats span { color: #fff; }
+
+    #paused-screen { display: none; }
+    #paused-screen .overlay-title { color: #60a5fa; }
+    #paused-screen .overlay-btn { color: #60a5fa; }
+
+    /* Kill notification */
+    #kill-feed {
+      position: absolute; top: 100px; right: 30px;
+      display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+    }
+    .kill-notification {
+      color: #ef4444; font-size: 12px; letter-spacing: 2px;
+      background: rgba(0,0,0,0.5); padding: 4px 10px;
+      border-left: 2px solid #ef4444;
+      animation: fadeKill 2s forwards;
+    }
+    @keyframes fadeKill { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+
+    /* FPS counter */
+    #fps { position: absolute; top: 25px; left: 30px; color: #555; font-size: 11px; }
+  </style>
+</head>
+<body>
+
+<!-- Start Screen -->
+<div id="start-screen" class="overlay">
+  <div class="overlay-title">BLOODWAVE</div>
+  <div class="overlay-sub">SURVIVE THE WAVES</div>
+  <button class="overlay-btn" id="start-btn" onclick="startGame()">
+    <span>▶ START GAME</span>
+  </button>
+  <div class="controls-info">
+    WASD — MOVE &nbsp;|&nbsp; MOUSE — AIM &nbsp;|&nbsp; LMB — SHOOT &nbsp;|&nbsp; R — RELOAD<br>
+    SHIFT — SPRINT &nbsp;|&nbsp; SPACE — JUMP &nbsp;|&nbsp; ESC — PAUSE<br>
+    1 — M4 ASSAULT &nbsp;|&nbsp; 2 — MP5 SMG &nbsp;|&nbsp; 3 — SPAS-12 &nbsp;|&nbsp; 4 — AWP SNIPER
+  </div>
+</div>
+
+<!-- Game Over Screen -->
+<div id="gameover-screen" class="overlay">
+  <div class="overlay-title">GAME OVER</div>
+  <div id="gameover-stats">
+    WAVE REACHED &nbsp; <span id="go-wave">0</span><br>
+    ENEMIES KILLED &nbsp; <span id="go-kills">0</span><br>
+    SCORE &nbsp; <span id="go-score">0</span>
+  </div>
+  <button class="overlay-btn" onclick="restartGame()"><span>↺ PLAY AGAIN</span></button>
+</div>
+
+<!-- Paused Screen -->
+<div id="paused-screen" class="overlay">
+  <div class="overlay-title">PAUSED</div>
+  <button class="overlay-btn" onclick="resumeGame()"><span>▶ RESUME</span></button>
+  <button class="overlay-btn" onclick="restartGame()"><span>↺ RESTART</span></button>
+</div>
+
+<!-- Canvas -->
+<canvas id="canvas"></canvas>
+
+<!-- HUD -->
+<div id="hud" style="display:none;">
+  <div id="fps">FPS: --</div>
+
+  <!-- Crosshair -->
+  <div id="crosshair"><div class="crosshair-dot"></div></div>
+
+  <!-- Health -->
+  <div id="health-container">
+    <div id="health-label">Health</div>
+    <div id="health-bar-bg"><div id="health-bar"></div></div>
+    <div id="health-value">100 / 100</div>
+  </div>
+
+  <!-- Weapon slots -->
+  <div id="weapon-slots">
+    <div class="weapon-slot active" id="weapon-slot-1"><span class="slot-key">[1]</span>M4 ASSAULT</div>
+    <div class="weapon-slot" id="weapon-slot-2"><span class="slot-key">[2]</span>MP5 SMG</div>
+    <div class="weapon-slot" id="weapon-slot-3"><span class="slot-key">[3]</span>SPAS-12</div>
+    <div class="weapon-slot" id="weapon-slot-4"><span class="slot-key">[4]</span>AWP SNIPER</div>
+  </div>
+
+  <!-- Ammo -->
+  <div id="ammo-container">
+    <div id="ammo-label">Ammo</div>
+    <div id="weapon-name">M4 ASSAULT</div>
+    <div id="ammo-value">30</div>
+    <div id="ammo-reserve">/ 90</div>
+  </div>
+
+  <!-- Reload -->
+  <div id="reload-bar-container">
+    <div id="reload-label">Reloading...</div>
+    <div id="reload-bar-bg"><div id="reload-bar"></div></div>
+  </div>
+
+  <!-- Wave -->
+  <div id="wave-container">
+    <div id="wave-label">Wave</div>
+    <div id="wave-number">1</div>
+    <div id="enemy-count">0 enemies</div>
+  </div>
+
+  <!-- Score -->
+  <div id="score-container">
+    <div id="score-label">Score</div>
+    <div id="score-value">0</div>
+  </div>
+
+  <!-- Sprint -->
+  <div id="sprint-indicator">⚡ SPRINTING</div>
+
+  <!-- Wave Announce -->
+  <div id="wave-announce">
+    <div id="wave-announce-text">WAVE 1</div>
+    <div id="wave-announce-sub">PREPARE FOR BATTLE</div>
+  </div>
+
+  <!-- Hit indicator -->
+  <div id="hit-indicator"></div>
+
+  <!-- Damage vignette -->
+  <div id="damage-vignette"></div>
+
+  <!-- Kill feed -->
+  <div id="kill-feed"></div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
