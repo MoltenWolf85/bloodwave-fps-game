@@ -4,7 +4,6 @@
 // ============================================================
 
 const SOUND_DEFS = {
-  // Weapon sounds (per weapon type)
   shoot_rifle: { src: "sounds/shoot_rifle.wav", volume: 0.55, maxInstances: 4 },
   shoot_smg: { src: "sounds/shoot_smg.wav", volume: 0.5, maxInstances: 6 },
   shoot_shotgun: {
@@ -17,27 +16,35 @@ const SOUND_DEFS = {
     volume: 0.8,
     maxInstances: 2,
   },
-  // Actions
   reload: { src: "sounds/reload.wav", volume: 0.6, maxInstances: 1 },
   empty_click: { src: "sounds/empty_click.wav", volume: 0.5, maxInstances: 2 },
-  // Hit / kill
   hit_enemy: { src: "sounds/hit_enemy.wav", volume: 0.6, maxInstances: 6 },
   kill_enemy: { src: "sounds/kill_enemy.wav", volume: 0.65, maxInstances: 3 },
-  // Player
   player_hurt: { src: "sounds/player_hurt.wav", volume: 0.7, maxInstances: 2 },
   player_death: {
     src: "sounds/player_death.wav",
     volume: 0.85,
     maxInstances: 1,
   },
-  // Waves
   wave_start: { src: "sounds/wave_start.wav", volume: 0.7, maxInstances: 1 },
   wave_clear: { src: "sounds/wave_clear.wav", volume: 0.75, maxInstances: 1 },
-  // Footstep (optional loop)
-  footstep: { src: "sounds/footstep.wav", volume: 0.25, maxInstances: 2 },
+  // Separate footstep sounds for walk vs sprint
+  // Supply sounds/footstep_walk.wav and sounds/footstep_sprint.wav in your sounds/ folder.
+  // If only one file exists, point both src entries at the same file and adjust volume.
+  footstep_walk: {
+    src: "sounds/footstep_walk.wav",
+    volume: 0.22,
+    maxInstances: 2,
+  },
+  footstep_sprint: {
+    src: "sounds/footstep_sprint.wav",
+    volume: 0.38,
+    maxInstances: 2,
+  },
+  // Legacy key kept so any old references don't throw (maps to walk sound)
+  footstep: { src: "sounds/footstep_walk.wav", volume: 0.22, maxInstances: 2 },
 };
 
-// Map weapon key → shoot sound key
 const WEAPON_SHOOT_SOUND = {
   assault_rifle: "shoot_rifle",
   smg: "shoot_smg",
@@ -48,11 +55,9 @@ const WEAPON_SHOOT_SOUND = {
 export class AudioManager {
   constructor() {
     this._ctx = null;
-    this._buffers = {}; // key → AudioBuffer
-    this._pools = {}; // key → AudioBufferSourceNode[]
+    this._buffers = {};
     this._muted = false;
     this._masterVolume = 1.0;
-    // Lazy-init AudioContext on first user gesture (browser policy)
     this._ready = false;
     this._pendingPlay = [];
 
@@ -69,12 +74,10 @@ export class AudioManager {
     this._masterGain.gain.value = this._masterVolume;
     this._masterGain.connect(this._ctx.destination);
 
-    // Load all sounds (silently ignore missing files)
     await Promise.all(
       Object.entries(SOUND_DEFS).map(([key, def]) => this._load(key, def.src)),
     );
 
-    // Drain pending plays
     for (const [key, vol] of this._pendingPlay) this.play(key, vol);
     this._pendingPlay = [];
   }
@@ -82,7 +85,7 @@ export class AudioManager {
   async _load(key, src) {
     try {
       const res = await fetch(src);
-      if (!res.ok) return; // missing file — just skip
+      if (!res.ok) return;
       const buf = await res.arrayBuffer();
       this._buffers[key] = await this._ctx.decodeAudioData(buf);
     } catch {

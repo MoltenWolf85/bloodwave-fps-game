@@ -13,8 +13,8 @@ const GRAVITY = -22;
 const MAX_HEALTH = 100;
 
 // Footstep timing
-const STEP_INTERVAL_WALK = 0.42; // seconds between steps walking
-const STEP_INTERVAL_SPRINT = 0.27; // seconds between steps sprinting
+const STEP_INTERVAL_WALK = 0.42;
+const STEP_INTERVAL_SPRINT = 0.27;
 
 export class Player {
   constructor(camera, scene, collidables) {
@@ -31,7 +31,7 @@ export class Player {
 
     this.onDamage = null;
     this.onDeath = null;
-    this.audio = null; // set by main.js
+    this.audio = null;
 
     this._keys = {};
     this._yaw = 0;
@@ -42,9 +42,7 @@ export class Player {
     this._bobTime = 0;
     this._bobY = 0;
 
-    // Footstep state
     this._stepTimer = 0;
-    this._wasMoving = false;
 
     this._setupInput();
   }
@@ -129,7 +127,7 @@ export class Player {
       this.onGround = false;
     }
 
-    // ── Footstep sounds ────────────────────────────────────────
+    // ── Footstep sounds (separate walk / sprint sounds) ────────
     if (isMoving && this.onGround) {
       const interval = this.isSprinting
         ? STEP_INTERVAL_SPRINT
@@ -137,18 +135,21 @@ export class Player {
       this._stepTimer -= delta;
       if (this._stepTimer <= 0) {
         this._stepTimer = interval;
-        this.audio?.play("footstep");
+        // Use distinct sound keys; audio.js falls back gracefully if file missing
+        this.audio?.play(
+          this.isSprinting ? "footstep_sprint" : "footstep_walk",
+        );
       }
     } else {
-      // Reset timer so first step plays immediately when moving starts
       this._stepTimer = 0;
     }
 
-    // Head bob
+    // Head bob — walk is subtle (0.035), sprint is pronounced (0.075)
     if (isMoving && this.onGround) {
       const bobSpeed = this.isSprinting ? 14 : 9;
       this._bobTime += delta * bobSpeed;
-      this._bobY = Math.sin(this._bobTime) * 0.06;
+      const bobAmp = this.isSprinting ? 0.075 : 0.035;
+      this._bobY = Math.sin(this._bobTime) * bobAmp;
     } else {
       this._bobTime = 0;
       this._bobY += (0 - this._bobY) * delta * 10;

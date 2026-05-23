@@ -53,7 +53,9 @@ export class AmmoPack {
     group.add(ring);
 
     const gy = window._sceneManager?.getTerrainHeight(x, z) ?? 0;
-    group.position.set(x, gy + 0.5, z);
+    // Sit 0.55 units above terrain — comfortably above ground, bob stays above too
+    this._baseY = gy + 0.55;
+    group.position.set(x, this._baseY, z);
     this.group = group;
     this.position = group.position;
     scene.add(group);
@@ -61,8 +63,9 @@ export class AmmoPack {
 
   update(delta) {
     if (this.collected) return;
-    this._bobTime += delta * 2.5;
-    this.group.position.y = this.position.y + Math.sin(this._bobTime) * 0.12;
+    this._bobTime += delta * 2.0;
+    // Small bob: ±0.06 units — never goes underground
+    this.group.position.y = this._baseY + Math.sin(this._bobTime) * 0.06;
     this.group.rotation.y += delta * 1.5;
   }
 
@@ -91,7 +94,7 @@ export class WaveManager {
     this._totalKillsExpected = 0;
     this._ammoPacks = [];
     this._ammoDropTimer = 0;
-    this.scene = null; // set by main.js
+    this.scene = null;
   }
 
   start() {
@@ -109,8 +112,6 @@ export class WaveManager {
     this._showAnnouncement(this.currentWave);
     this._updateUI();
     this.audio?.play("wave_start");
-
-    // Drop ammo packs at wave start (more packs on harder waves)
     this._spawnAmmoPacks(Math.min(2 + Math.floor(this.currentWave / 2), 6));
   }
 
@@ -140,7 +141,6 @@ export class WaveManager {
   onEnemyKilled() {
     this._killsThisWave++;
     this._updateUI();
-    // Random mid-wave ammo drop (20% chance per kill)
     if (this.scene && Math.random() < 0.2) {
       const player = window._player;
       if (player) {
@@ -159,7 +159,6 @@ export class WaveManager {
   }
 
   update(delta) {
-    // Update ammo packs
     const playerPos = window._player?.getPosition();
     for (let i = this._ammoPacks.length - 1; i >= 0; i--) {
       const pack = this._ammoPacks[i];
@@ -167,9 +166,8 @@ export class WaveManager {
       if (playerPos && pack.checkPickup(playerPos)) {
         pack.collect();
         this._ammoPacks.splice(i, 1);
-        // Give ammo to shooting system
         if (window._shootingSystem) window._shootingSystem.giveAmmo();
-        this.audio?.play("wave_clear"); // reuse a pleasant sound for pickup
+        this.audio?.play("wave_clear");
       }
     }
 
