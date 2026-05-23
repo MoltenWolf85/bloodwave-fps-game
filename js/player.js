@@ -12,13 +12,16 @@ const JUMP_FORCE = 8;
 const GRAVITY = -22;
 const MAX_HEALTH = 100;
 
+// Footstep timing
+const STEP_INTERVAL_WALK = 0.42; // seconds between steps walking
+const STEP_INTERVAL_SPRINT = 0.27; // seconds between steps sprinting
+
 export class Player {
   constructor(camera, scene, collidables) {
     this.camera = camera;
     this.scene = scene;
     this.collidables = collidables;
 
-    // State
     this.health = MAX_HEALTH;
     this.maxHealth = MAX_HEALTH;
     this.isDead = false;
@@ -26,26 +29,26 @@ export class Player {
     this.onGround = false;
     this.isSprinting = false;
 
-    // Callbacks
     this.onDamage = null;
     this.onDeath = null;
+    this.audio = null; // set by main.js
 
-    // Input
     this._keys = {};
     this._yaw = 0;
     this._pitch = 0;
 
-    // Bounding box (for enemy collision checks)
     this.boundingBox = new THREE.Box3();
 
-    // Head bob
     this._bobTime = 0;
     this._bobY = 0;
+
+    // Footstep state
+    this._stepTimer = 0;
+    this._wasMoving = false;
 
     this._setupInput();
   }
 
-  // ── Input ──────────────────────────────────────────────────
   _setupInput() {
     document.addEventListener("keydown", (e) => {
       this._keys[e.code] = true;
@@ -68,21 +71,17 @@ export class Player {
     );
   }
 
-  // ── Update ─────────────────────────────────────────────────
-  update(delta, sceneManager) {
+  update(delta) {
     if (this.isDead) return;
-    this._updateMovement(delta, sceneManager);
+    this._updateMovement(delta);
     this._updateCamera();
   }
 
-  _updateMovement(delta, sceneManager) {
+  _updateMovement(delta) {
     const k = this._keys;
-
-    // Sprint
     this.isSprinting = k["ShiftLeft"] || k["ShiftRight"];
     const speed = this.isSprinting ? SPRINT_SPEED : WALK_SPEED;
 
-    // Horizontal movement direction
     const forward = new THREE.Vector3(
       -Math.sin(this._yaw),
       0,
@@ -100,47 +99,53 @@ export class Player {
     if (k["KeyD"] || k["ArrowRight"]) moveDir.addScaledVector(right, 1);
     if (k["KeyA"] || k["ArrowLeft"]) moveDir.addScaledVector(right, -1);
 
-    if (moveDir.lengthSq() > 0) moveDir.normalize();
+    const isMoving = moveDir.lengthSq() > 0;
+    if (isMoving) moveDir.normalize();
 
     this.velocity.x = moveDir.x * speed;
     this.velocity.z = moveDir.z * speed;
 
-    // Jump
     if (k["Space"] && this.onGround) {
       this.velocity.y = JUMP_FORCE;
       this.onGround = false;
     }
-
-    // Gravity
     this.velocity.y += GRAVITY * delta;
 
-    // Integrate position
     const pos = this.camera.position;
     pos.x += this.velocity.x * delta;
     pos.z += this.velocity.z * delta;
     pos.y += this.velocity.y * delta;
 
-    // ── Collision resolution ──────────────────────────────────
     this._resolveCollisions(pos);
 
-    // ── Terrain floor ─────────────────────────────────────────
-    // Get terrain height via scene manager (injected via global)
-    let groundY = window._sceneManager
-      ? window._sceneManager.getTerrainHeight(pos.x, pos.z)
-      : 0;
-    const minY = groundY + PLAYER_HEIGHT;
-
-    if (pos.y <= minY) {
-      pos.y = minY;
+    const groundY =
+      (window._sceneManager?.getTerrainHeight(pos.x, pos.z) ?? 0) +
+      PLAYER_HEIGHT;
+    if (pos.y <= groundY) {
+      pos.y = groundY;
       this.velocity.y = 0;
       this.onGround = true;
-    } else if (pos.y > minY + 0.05) {
+    } else if (pos.y > groundY + 0.05) {
       this.onGround = false;
     }
 
+    // ── Footstep sounds ────────────────────────────────────────
+    if (isMoving && this.onGround) {
+      const interval = this.isSprinting
+        ? STEP_INTERVAL_SPRINT
+        : STEP_INTERVAL_WALK;
+      this._stepTimer -= delta;
+      if (this._stepTimer <= 0) {
+        this._stepTimer = interval;
+        this.audio?.play("footstep");
+      }
+    } else {
+      // Reset timer so first step plays immediately when moving starts
+      this._stepTimer = 0;
+    }
+
     // Head bob
-    const isMoving = moveDir.lengthSq() > 0 && this.onGround;
-    if (isMoving) {
+    if (isMoving && this.onGround) {
       const bobSpeed = this.isSprinting ? 14 : 9;
       this._bobTime += delta * bobSpeed;
       this._bobY = Math.sin(this._bobTime) * 0.06;
@@ -151,42 +156,32 @@ export class Player {
   }
 
   _resolveCollisions(pos) {
-    // Simple AABB vs AABB push-out
     const half = PLAYER_RADIUS;
     const h = PLAYER_HEIGHT;
-
     for (const c of this.collidables) {
       const b = c.box;
-
-      // Broad check
       if (pos.x + half < b.min.x || pos.x - half > b.max.x) continue;
       if (pos.z + half < b.min.z || pos.z - half > b.max.z) continue;
       if (pos.y < b.min.y || pos.y - h > b.max.y) continue;
 
-      // Overlap on each axis
-      const ox1 = pos.x + half - b.min.x;
-      const ox2 = b.max.x - (pos.x - half);
-      const oz1 = pos.z + half - b.min.z;
-      const oz2 = b.max.z - (pos.z - half);
+      const ox1 = pos.x + half - b.min.x,
+        ox2 = b.max.x - (pos.x - half);
+      const oz1 = pos.z + half - b.min.z,
+        oz2 = b.max.z - (pos.z - half);
+      const ox = Math.min(ox1, ox2),
+        oz = Math.min(oz1, oz2);
 
-      const ox = Math.min(ox1, ox2);
-      const oz = Math.min(oz1, oz2);
-
-      // Push out on smallest overlap axis
       if (ox < oz) {
-        if (ox1 < ox2) pos.x -= ox;
-        else pos.x += ox;
+        pos.x += ox1 < ox2 ? -ox : ox;
         this.velocity.x = 0;
       } else {
-        if (oz1 < oz2) pos.z -= oz;
-        else pos.z += oz;
+        pos.z += oz1 < oz2 ? -oz : oz;
         this.velocity.z = 0;
       }
     }
   }
 
   _updateCamera() {
-    // Apply yaw/pitch to camera quaternion
     const qYaw = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0),
       this._yaw,
@@ -196,12 +191,9 @@ export class Player {
       this._pitch,
     );
     this.camera.quaternion.copy(qYaw).multiply(qPitch);
-
-    // Head bob offset
     this.camera.position.y += this._bobY;
   }
 
-  // ── Public API ─────────────────────────────────────────────
   getPosition() {
     return this.camera.position.clone();
   }
@@ -225,6 +217,3 @@ export class Player {
     return this.boundingBox;
   }
 }
-
-// Make scene manager available for terrain height sampling
-// (set by main.js after init)

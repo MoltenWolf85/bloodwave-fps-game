@@ -18,9 +18,9 @@ let renderer,
   shootingSystem,
   hud,
   audio;
-let gameRunning = false;
-let gamePaused = false;
-let clock;
+let gameRunning = false,
+  gamePaused = false,
+  clock;
 
 window.startGame = startGame;
 window.restartGame = restartGame;
@@ -53,14 +53,19 @@ function init() {
   waveManager = new WaveManager(enemySystem, player);
   hud = new HUD(player, waveManager, shootingSystem);
 
-  // Wire audio into systems
+  // Wire audio
   shootingSystem.audio = audio;
   player.audio = audio;
   waveManager.audio = audio;
 
+  // Wire scene to wave manager (for ammo drops)
+  waveManager.scene = sceneManager.scene;
+
+  // Globals used by systems
   window._sceneManager = sceneManager;
   window._player = player;
   window._enemySystem = enemySystem;
+  window._shootingSystem = shootingSystem;
 
   shootingSystem.onHit = () => hud.showHitIndicator();
   shootingSystem.onKill = () => {

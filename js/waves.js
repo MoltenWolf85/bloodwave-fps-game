@@ -1,30 +1,97 @@
 // ============================================================
-// waves.js — Wave manager: progression, difficulty scaling
+// waves.js — Wave manager: progression, harder difficulty scaling,
+//             ammo supply drops
 // ============================================================
+import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js";
 
 const WAVE_CONFIGS = [
-  { count: 5, hp: 40, speed: 3.5, spawnRadius: 40 },
-  { count: 8, hp: 55, speed: 4.0, spawnRadius: 45 },
-  { count: 12, hp: 70, speed: 4.5, spawnRadius: 50 },
-  { count: 15, hp: 90, speed: 5.0, spawnRadius: 45 },
-  { count: 20, hp: 110, speed: 5.5, spawnRadius: 50 },
-  { count: 25, hp: 130, speed: 6.0, spawnRadius: 55 },
-  { count: 30, hp: 160, speed: 6.5, spawnRadius: 55 },
-  { count: 35, hp: 200, speed: 7.0, spawnRadius: 60 },
+  { count: 5, hp: 50, speed: 3.0, spawnRadius: 38 },
+  { count: 9, hp: 70, speed: 3.5, spawnRadius: 42 },
+  { count: 14, hp: 90, speed: 4.0, spawnRadius: 45 },
+  { count: 18, hp: 115, speed: 4.5, spawnRadius: 45 },
+  { count: 24, hp: 140, speed: 5.2, spawnRadius: 50 },
+  { count: 30, hp: 175, speed: 6.0, spawnRadius: 52 },
+  { count: 38, hp: 220, speed: 6.8, spawnRadius: 55 },
+  { count: 48, hp: 280, speed: 7.5, spawnRadius: 58 },
 ];
 
-const BETWEEN_WAVE_DELAY = 6; // seconds
+const BETWEEN_WAVE_DELAY = 7;
+
+// Ammo pack: gives back ammo when walked over
+export class AmmoPack {
+  constructor(scene, x, z) {
+    this.scene = scene;
+    this.collected = false;
+    this._bobTime = Math.random() * Math.PI * 2;
+
+    const group = new THREE.Group();
+    // Box body
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.3, 0.35),
+      new THREE.MeshLambertMaterial({ color: 0xf59e0b }),
+    );
+    group.add(body);
+    // Cross symbol
+    const h = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.08, 0.04),
+      new THREE.MeshBasicMaterial({ color: 0x000000 }),
+    );
+    h.position.z = 0.18;
+    const v = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.24, 0.04),
+      new THREE.MeshBasicMaterial({ color: 0x000000 }),
+    );
+    v.position.z = 0.18;
+    group.add(h, v);
+    // Glow ring
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.4, 0.04, 6, 16),
+      new THREE.MeshBasicMaterial({ color: 0xfcd34d }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = -0.1;
+    group.add(ring);
+
+    const gy = window._sceneManager?.getTerrainHeight(x, z) ?? 0;
+    group.position.set(x, gy + 0.5, z);
+    this.group = group;
+    this.position = group.position;
+    scene.add(group);
+  }
+
+  update(delta) {
+    if (this.collected) return;
+    this._bobTime += delta * 2.5;
+    this.group.position.y = this.position.y + Math.sin(this._bobTime) * 0.12;
+    this.group.rotation.y += delta * 1.5;
+  }
+
+  checkPickup(playerPos) {
+    if (this.collected) return false;
+    const dx = playerPos.x - this.group.position.x;
+    const dz = playerPos.z - this.group.position.z;
+    return dx * dx + dz * dz < 1.8 * 1.8;
+  }
+
+  collect() {
+    this.collected = true;
+    this.scene.remove(this.group);
+  }
+}
 
 export class WaveManager {
   constructor(enemySystem, player) {
     this.enemySystem = enemySystem;
     this.player = player;
     this.currentWave = 0;
-    this.state = "idle"; // idle | active | between
+    this.state = "idle";
     this._timer = 0;
-    this.audio = null; // set by main.js
+    this.audio = null;
     this._killsThisWave = 0;
     this._totalKillsExpected = 0;
+    this._ammoPacks = [];
+    this._ammoDropTimer = 0;
+    this.scene = null; // set by main.js
   }
 
   start() {
@@ -35,47 +102,83 @@ export class WaveManager {
   _nextWave() {
     this.currentWave++;
     this._killsThisWave = 0;
-
     const cfg = this._waveConfig(this.currentWave);
     this._totalKillsExpected = cfg.count;
-
     this.state = "active";
     this.enemySystem.spawn(cfg);
-
     this._showAnnouncement(this.currentWave);
     this._updateUI();
     this.audio?.play("wave_start");
+
+    // Drop ammo packs at wave start (more packs on harder waves)
+    this._spawnAmmoPacks(Math.min(2 + Math.floor(this.currentWave / 2), 6));
   }
 
   _waveConfig(wave) {
-    const base = WAVE_CONFIGS[Math.min(wave - 1, WAVE_CONFIGS.length - 1)];
-
-    // Beyond preset waves: keep scaling
+    const idx = Math.min(wave - 1, WAVE_CONFIGS.length - 1);
+    const base = WAVE_CONFIGS[idx];
     const extra = Math.max(0, wave - WAVE_CONFIGS.length);
     return {
-      count: base.count + extra * 5,
-      hp: base.hp + extra * 30,
-      speed: Math.min(base.speed + extra * 0.3, 10),
+      count: base.count + extra * 7,
+      hp: base.hp + extra * 40,
+      speed: Math.min(base.speed + extra * 0.4, 11),
       spawnRadius: base.spawnRadius,
     };
+  }
+
+  _spawnAmmoPacks(count) {
+    if (!this.scene) return;
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = 8 + Math.random() * 25;
+      const x = Math.cos(angle) * r;
+      const z = Math.sin(angle) * r;
+      this._ammoPacks.push(new AmmoPack(this.scene, x, z));
+    }
   }
 
   onEnemyKilled() {
     this._killsThisWave++;
     this._updateUI();
+    // Random mid-wave ammo drop (20% chance per kill)
+    if (this.scene && Math.random() < 0.2) {
+      const player = window._player;
+      if (player) {
+        const pp = player.getPosition();
+        const angle = Math.random() * Math.PI * 2;
+        const r = 6 + Math.random() * 12;
+        this._ammoPacks.push(
+          new AmmoPack(
+            this.scene,
+            pp.x + Math.cos(angle) * r,
+            pp.z + Math.sin(angle) * r,
+          ),
+        );
+      }
+    }
   }
 
   update(delta) {
+    // Update ammo packs
+    const playerPos = window._player?.getPosition();
+    for (let i = this._ammoPacks.length - 1; i >= 0; i--) {
+      const pack = this._ammoPacks[i];
+      pack.update(delta);
+      if (playerPos && pack.checkPickup(playerPos)) {
+        pack.collect();
+        this._ammoPacks.splice(i, 1);
+        // Give ammo to shooting system
+        if (window._shootingSystem) window._shootingSystem.giveAmmo();
+        this.audio?.play("wave_clear"); // reuse a pleasant sound for pickup
+      }
+    }
+
     if (this.state === "between") {
       this._timer -= delta;
-      if (this._timer <= 0) {
-        this._nextWave();
-      }
+      if (this._timer <= 0) this._nextWave();
     } else if (this.state === "active") {
-      // Check if wave is cleared
       const alive = this.enemySystem.getAliveCount();
       if (alive === 0 && this._killsThisWave >= this._totalKillsExpected) {
-        // Small buffer before declaring wave clear
         this._timer = this._timer || BETWEEN_WAVE_DELAY;
         this._timer -= delta;
         if (this._timer <= 0) {
@@ -86,7 +189,7 @@ export class WaveManager {
           this._updateUI();
         }
       } else {
-        this._timer = BETWEEN_WAVE_DELAY; // reset
+        this._timer = BETWEEN_WAVE_DELAY;
       }
     }
   }
@@ -99,7 +202,7 @@ export class WaveManager {
     sub.textContent =
       wave === 1
         ? "PREPARE FOR BATTLE"
-        : `${this._waveConfig(wave).count} ENEMIES INCOMING`;
+        : `${this._waveConfig(wave).count} ZOMBIES INCOMING`;
     el.style.opacity = "1";
     setTimeout(() => {
       el.style.opacity = "0";
@@ -126,6 +229,6 @@ export class WaveManager {
     document.getElementById("enemy-count").textContent =
       this.state === "between"
         ? `NEXT WAVE IN ${Math.ceil(this._timer)}s`
-        : `${alive} enemies`;
+        : `${alive} zombies`;
   }
 }

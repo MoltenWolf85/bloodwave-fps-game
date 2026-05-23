@@ -1,13 +1,13 @@
 // ============================================================
 // shooting.js — Weapon system: multiple guns, visible viewmodel,
 //                raycast shooting, muzzle flash, tracers, reload
+//                Added: giveAmmo() for ammo pack pickups
 // ============================================================
 import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js";
 
 const TRACER_SPEED = 80;
 const TRACER_LIFE = 0.15;
 
-// ── Weapon Definitions ────────────────────────────────────────
 const WEAPONS = {
   assault_rifle: {
     name: "M4 ASSAULT",
@@ -86,7 +86,6 @@ export class ShootingSystem {
     this.player = player;
     this.enemySystem = enemySystem;
 
-    // Weapon scene rendered on top of world
     this.weaponScene = new THREE.Scene();
     this.weaponScene.add(new THREE.AmbientLight(0xffffff, 0.9));
     const wLight = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -103,14 +102,10 @@ export class ShootingSystem {
 
     this.tracers = [];
     this.hitDecals = [];
-
-    // ── Static mesh list for bullet-hole raycasting ────────────
-    // Built lazily on first shot (scene is fully populated by then)
     this._staticMeshes = null;
 
     this.onHit = null;
     this.onKill = null;
-    // audio injected by main.js after construction
     this.audio = null;
 
     this.currentWeaponKey = "assault_rifle";
@@ -168,18 +163,29 @@ export class ShootingSystem {
     this._updateWeaponUI();
   }
 
-  // ── Build static mesh list (called once on first shot) ────────
-  // Collects terrain + building/barrier meshes from the scene.
-  // Excludes instanced vegetation and dynamic objects (enemies,
-  // tracers, blood) so bullet holes always land on real surfaces.
+  // ── Give ammo (called by ammo pack pickup) ─────────────────
+  giveAmmo() {
+    // Refill all weapons proportionally
+    for (const [key, def] of Object.entries(WEAPONS)) {
+      const st = this.ammoState[key];
+      const refill = Math.floor(def.reserveMax * 0.4); // 40% of max reserve
+      st.reserve = Math.min(st.reserve + refill, def.reserveMax);
+    }
+    this._updateAmmoUI();
+    // Flash ammo display
+    const el = document.getElementById("ammo-value");
+    if (el) {
+      el.style.color = "#22c55e";
+      setTimeout(() => {
+        el.style.color = "#fff";
+      }, 600);
+    }
+  }
+
   _buildStaticMeshes() {
     this._staticMeshes = [];
     const terrain = window._sceneManager?.terrain;
     if (terrain) this._staticMeshes.push(terrain);
-
-    // Collect only meshes explicitly tagged as static world geometry.
-    // scene.js sets userData.isStatic = true on buildings/barriers.
-    // InstancedMesh (trees, grass, rocks) and dynamic enemy meshes are excluded.
     this.scene.traverse((obj) => {
       if (obj === terrain) return;
       if (!obj.isMesh || obj instanceof THREE.InstancedMesh) return;
@@ -187,7 +193,6 @@ export class ShootingSystem {
     });
   }
 
-  // ── Build All Gun Models ──────────────────────────────────────
   _buildAllGunModels() {
     for (const key of Object.keys(WEAPONS)) {
       const group = this["_build_" + key]();
@@ -235,7 +240,6 @@ export class ShootingSystem {
     g.add(grip);
     g.add(_box(0.035, 0.16, 0.045, metal, 0, -0.115, -0.04));
     g.add(_box(0.008, 0.008, 0.14, acc, 0.025, 0.02, 0.07));
-    g.add(_box(0.005, 0.02, 0.005, acc, 0, 0.05, -0.3));
     g.userData.muzzleLocal = new THREE.Vector3(0, 0.005, -0.52);
     return g;
   }
@@ -311,7 +315,6 @@ export class ShootingSystem {
     this.weaponCamera.add(this.muzzleFlash);
   }
 
-  // ── Weapon Switching ──────────────────────────────────────────
   switchWeapon(key) {
     if (key === this.currentWeaponKey) return;
     if (this.ammoState[this.currentWeaponKey].isReloading) {
@@ -338,11 +341,9 @@ export class ShootingSystem {
     return this.weaponModels[this.currentWeaponKey];
   }
 
-  // ── Shoot ──────────────────────────────────────────────────────
   _shoot() {
-    const def = this._currentDef;
-    const st = this._currentState;
-
+    const def = this._currentDef,
+      st = this._currentState;
     if (st.ammo <= 0) {
       this.audio?.play("empty_click");
       if (st.reserve > 0) this._startReload();
@@ -350,11 +351,7 @@ export class ShootingSystem {
     }
     st.ammo--;
     this._updateAmmoUI();
-
-    // Play weapon fire sound
     this.audio?.playShoot(this.currentWeaponKey);
-
-    // Build static mesh list once scene is ready
     if (!this._staticMeshes) this._buildStaticMeshes();
 
     const origin = this.player.camera.position.clone();
@@ -391,7 +388,6 @@ export class ShootingSystem {
       this.audio?.play("kill_enemy");
     }
 
-    // Muzzle flash
     const mLocal =
       this._currentModel.userData.muzzleLocal || new THREE.Vector3(0, 0, -0.5);
     const bp = this._currentDef.basePos;
@@ -402,7 +398,6 @@ export class ShootingSystem {
     );
     this.muzzleFlash.material.opacity = 0.9;
     this._flashTimer = 0.06;
-
     this._gunRecoil = -def.recoilGun;
     this.player._pitch -= def.recoilPitch;
   }
@@ -410,11 +405,10 @@ export class ShootingSystem {
   _spawnTracer(origin, direction) {
     const geo = new THREE.CylinderGeometry(0.015, 0.015, 1.5, 4);
     geo.rotateX(Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xffee88,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshBasicMaterial({ color: 0xffee88, depthWrite: false }),
+    );
     mesh.position.copy(origin);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
     this.scene.add(mesh);
@@ -425,12 +419,9 @@ export class ShootingSystem {
     });
   }
 
-  // ── Environment raycast — only hits static world geometry ─────
   _envRaycast(origin, direction) {
     if (!this._staticMeshes) return;
-
     const ray = new THREE.Raycaster(origin, direction, 0, 200);
-    // intersectObjects with recursive:false so we test each mesh individually
     const hits = ray.intersectObjects(this._staticMeshes, false);
     if (hits.length > 0) {
       const h = hits[0];
@@ -448,7 +439,6 @@ export class ShootingSystem {
     setTimeout(() => this.scene.remove(m), 300);
   }
 
-  // ── Bullet hole — world-space normal transforms correctly ─────
   _spawnBulletHole(point, faceNormal, hitObject) {
     const m = new THREE.Mesh(
       new THREE.CircleGeometry(0.06, 6),
@@ -460,9 +450,7 @@ export class ShootingSystem {
         polygonOffsetUnits: -1,
       }),
     );
-
     if (faceNormal && hitObject) {
-      // Transform face normal from object-local space → world space
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(
         hitObject.matrixWorld,
       );
@@ -470,26 +458,19 @@ export class ShootingSystem {
         .clone()
         .applyMatrix3(normalMatrix)
         .normalize();
-
-      // Push slightly off the surface along world normal
       m.position.copy(point).addScaledVector(worldNormal, 0.015);
-      // Orient decal to face outward along world normal
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), worldNormal);
     } else {
-      // Fallback: just place at hit point slightly above terrain
       m.position.copy(point);
       m.position.y += 0.02;
       m.rotation.x = -Math.PI / 2;
     }
-
     this.scene.add(m);
     this.hitDecals.push({ mesh: m });
-    if (this.hitDecals.length > 60) {
+    if (this.hitDecals.length > 60)
       this.scene.remove(this.hitDecals.shift().mesh);
-    }
   }
 
-  // ── Reload ─────────────────────────────────────────────────────
   _startReload() {
     const st = this._currentState;
     if (st.isReloading || st.reserve <= 0) return;
@@ -525,10 +506,9 @@ export class ShootingSystem {
     }
   }
 
-  // ── Weapon transform (unchanged logic) ───────────────────────
   _updateWeaponTransform(delta) {
-    const model = this._currentModel;
-    const def = this._currentDef;
+    const model = this._currentModel,
+      def = this._currentDef;
     const moving =
       this.player.onGround &&
       (this.player._keys["KeyW"] ||
@@ -552,13 +532,10 @@ export class ShootingSystem {
     this._adsAmount += (adsTarget - this._adsAmount) * Math.min(1, delta * 12);
 
     const [bx, by, bz] = def.basePos;
-    const adsX = 0.0,
-      adsY = by + 0.06,
-      adsZ = bz + 0.04;
-    const px = THREE.MathUtils.lerp(bx, adsX, this._adsAmount) + bobX;
-    const py = THREE.MathUtils.lerp(by, adsY, this._adsAmount) + bobY;
+    const px = THREE.MathUtils.lerp(bx, 0.0, this._adsAmount) + bobX;
+    const py = THREE.MathUtils.lerp(by, by + 0.06, this._adsAmount) + bobY;
     const pz =
-      THREE.MathUtils.lerp(bz, adsZ, this._adsAmount) + this._gunRecoil;
+      THREE.MathUtils.lerp(bz, bz + 0.04, this._adsAmount) + this._gunRecoil;
     model.position.set(px, py, pz);
 
     const tiltZ = this.player.isSprinting ? -0.3 : 0;
@@ -567,11 +544,9 @@ export class ShootingSystem {
     model.rotation.x += (tiltX - model.rotation.x) * Math.min(1, delta * 10);
   }
 
-  // ── Update ─────────────────────────────────────────────────────
   update(delta) {
-    const def = this._currentDef;
-    const st = this._currentState;
-
+    const def = this._currentDef,
+      st = this._currentState;
     st.fireTimer -= delta;
 
     if (!st.isReloading && st.fireTimer <= 0 && this._mouseDown) {
@@ -610,19 +585,16 @@ export class ShootingSystem {
     if (sprintEl) sprintEl.style.opacity = this.player.isSprinting ? "1" : "0";
   }
 
-  // ── Render ─────────────────────────────────────────────────────
   renderWeapon(renderer) {
     renderer.clearDepth();
     renderer.render(this.weaponScene, this.weaponCamera);
   }
 
-  // ── Invalidate static mesh cache (call after enemies spawn) ───
   invalidateStaticMeshes() {
     this._staticMeshes = null;
   }
 }
 
-// ── Geometry helpers ──────────────────────────────────────────
 function _box(w, h, d, mat, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);

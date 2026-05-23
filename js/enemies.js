@@ -1,13 +1,13 @@
 // ============================================================
-// enemies.js — Enemy AI: spawning, movement, attack, death
+// enemies.js — Zombie Enemy AI: spawning, movement, attack, death
 // ============================================================
 import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js";
 
-const ENEMY_RADIUS = 0.5;
+const ENEMY_RADIUS = 0.45;
 const ENEMY_HEIGHT = 1.8;
-const ATTACK_RANGE = 2.2;
-const ATTACK_DAMAGE = 8;
-const ATTACK_RATE = 1.2; // attacks per second
+const ATTACK_RANGE = 2.0;
+const ATTACK_DAMAGE = 10;
+const ATTACK_RATE = 1.2;
 
 export class EnemySystem {
   constructor(scene, collidables) {
@@ -15,32 +15,27 @@ export class EnemySystem {
     this.collidables = collidables;
     this.enemies = [];
     this._raycaster = new THREE.Raycaster();
-
-    // Shared geometry / materials for performance
     this._buildSharedAssets();
   }
 
   _buildSharedAssets() {
-    // Body
     this.bodyGeo = new THREE.BoxGeometry(0.7, 1.1, 0.4);
     this.headGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
     this.limbGeo = new THREE.BoxGeometry(0.22, 0.85, 0.22);
 
-    this.matBase = new THREE.MeshLambertMaterial({ color: 0x2d4a1e }); // dark green uniform
-    this.matHead = new THREE.MeshLambertMaterial({ color: 0xc68642 }); // skin
-    this.matHelm = new THREE.MeshLambertMaterial({ color: 0x3b3b3b }); // helmet
-    this.matLimb = new THREE.MeshLambertMaterial({ color: 0x2d4a1e });
-
-    // Health bar texture
+    // Zombie: torn dark clothes, grey-green skin
+    this.matBody = new THREE.MeshLambertMaterial({ color: 0x2a1a0a }); // dark torn clothes
+    this.matBody2 = new THREE.MeshLambertMaterial({ color: 0x1a0a0a }); // darker variant
+    this.matSkin = new THREE.MeshLambertMaterial({ color: 0x6b7a4a }); // grey-green zombie skin
+    this.matBlood = new THREE.MeshLambertMaterial({ color: 0x8b0000 }); // blood stains
+    this.matEye = new THREE.MeshBasicMaterial({ color: 0xff2200 }); // glowing red eyes
+    this.matBone = new THREE.MeshLambertMaterial({ color: 0xd4c9a0 }); // bone/teeth
     this.hbBgMat = new THREE.MeshBasicMaterial({ color: 0x333333 });
-    this.hbFgMat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
   }
 
-  // ── Spawn ──────────────────────────────────────────────────
   spawn(config) {
-    // config: { hp, speed, count, spawnRadius }
     for (let i = 0; i < config.count; i++) {
-      setTimeout(() => this._spawnOne(config), i * 300);
+      setTimeout(() => this._spawnOne(config), i * 250);
     }
   }
 
@@ -49,53 +44,128 @@ export class EnemySystem {
     const r = config.spawnRadius + Math.random() * 15;
     const x = Math.cos(angle) * r;
     const z = Math.sin(angle) * r;
-    const y =
-      (window._sceneManager?.getTerrainHeight(x, z) ?? 0) + ENEMY_HEIGHT / 2;
+    const terrainY = window._sceneManager?.getTerrainHeight(x, z) ?? 0;
+    const y = terrainY + ENEMY_HEIGHT / 2;
 
     const group = new THREE.Group();
     group.position.set(x, y, z);
 
-    // Body
-    const body = new THREE.Mesh(this.bodyGeo, this.matBase.clone());
+    // Randomize variant slightly
+    const skinTint = new THREE.Color(0x6b7a4a).offsetHSL(
+      0,
+      0,
+      (Math.random() - 0.5) * 0.15,
+    );
+    const skinMat = new THREE.MeshLambertMaterial({ color: skinTint });
+    const clothColor = Math.random() > 0.5 ? 0x2a1a0a : 0x1e1408;
+    const clothMat = new THREE.MeshLambertMaterial({ color: clothColor });
+
+    // Body (ragged clothes)
+    const body = new THREE.Mesh(this.bodyGeo, clothMat.clone());
     body.position.y = 0;
     body.castShadow = true;
     group.add(body);
 
-    // Head
-    const head = new THREE.Mesh(this.headGeo, this.matHead.clone());
-    head.position.y = 0.8;
+    // Torn shirt detail
+    const torsoDetail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.72, 0.4, 0.42),
+      new THREE.MeshLambertMaterial({ color: 0x3d2010 }),
+    );
+    torsoDetail.position.y = 0.2;
+    group.add(torsoDetail);
+
+    // Head (zombie skin)
+    const head = new THREE.Mesh(this.headGeo, skinMat.clone());
+    head.position.y = 0.82;
     head.castShadow = true;
     group.add(head);
 
-    // Helmet
-    const helm = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 0.28, 0.55),
-      this.matHelm.clone(),
+    // Jaw (slightly open for zombie look)
+    const jaw = new THREE.Mesh(
+      new THREE.BoxGeometry(0.38, 0.14, 0.3),
+      skinMat.clone(),
     );
-    helm.position.y = 1.0;
-    group.add(helm);
+    jaw.position.set(0, 0.56, 0.1);
+    group.add(jaw);
 
-    // Arms
-    const armL = new THREE.Mesh(this.limbGeo, this.matLimb.clone());
-    armL.position.set(-0.46, -0.05, 0);
+    // Teeth
+    const teeth = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.06, 0.08),
+      this.matBone.clone(),
+    );
+    teeth.position.set(0, 0.6, 0.22);
+    group.add(teeth);
+
+    // Red eyes
+    const eyeGeo = new THREE.BoxGeometry(0.09, 0.07, 0.06);
+    const eyeL = new THREE.Mesh(eyeGeo, this.matEye.clone());
+    eyeL.position.set(-0.13, 0.88, 0.24);
+    group.add(eyeL);
+    const eyeR = new THREE.Mesh(eyeGeo, this.matEye.clone());
+    eyeR.position.set(0.13, 0.88, 0.24);
+    group.add(eyeR);
+
+    // Blood stains on body
+    if (Math.random() > 0.4) {
+      const stain = new THREE.Mesh(
+        new THREE.BoxGeometry(0.2, 0.3, 0.42),
+        new THREE.MeshLambertMaterial({ color: 0x6b0000 }),
+      );
+      stain.position.set(
+        (Math.random() - 0.5) * 0.3,
+        (Math.random() - 0.5) * 0.4,
+        0.0,
+      );
+      group.add(stain);
+    }
+
+    // Arms (outstretched zombie pose - rotated forward)
+    const armGeo = new THREE.BoxGeometry(0.22, 0.85, 0.22);
+    const armL = new THREE.Mesh(armGeo, skinMat.clone());
+    armL.position.set(-0.48, 0.08, 0);
+    armL.rotation.x = -0.8; // stretched forward
     armL.castShadow = true;
     group.add(armL);
 
-    const armR = armL.clone();
-    armR.position.set(0.46, -0.05, 0);
+    const armR = new THREE.Mesh(armGeo, skinMat.clone());
+    armR.position.set(0.48, 0.08, 0);
+    armR.rotation.x = -0.8;
+    armR.castShadow = true;
     group.add(armR);
 
+    // Hands (slightly enlarged claws)
+    const handGeo = new THREE.BoxGeometry(0.22, 0.2, 0.22);
+    const handL = new THREE.Mesh(handGeo, skinMat.clone());
+    handL.position.set(-0.48, -0.42, -0.42);
+    group.add(handL);
+    const handR = new THREE.Mesh(handGeo, skinMat.clone());
+    handR.position.set(0.48, -0.42, -0.42);
+    group.add(handR);
+
     // Legs
-    const legL = new THREE.Mesh(this.limbGeo, this.matLimb.clone());
-    legL.position.set(-0.2, -0.97, 0);
+    const legGeo = new THREE.BoxGeometry(0.26, 0.9, 0.26);
+    const legL = new THREE.Mesh(legGeo, clothMat.clone());
+    legL.position.set(-0.2, -1.0, 0);
     legL.castShadow = true;
     group.add(legL);
-
-    const legR = legL.clone();
-    legR.position.set(0.2, -0.97, 0);
+    const legR = new THREE.Mesh(legGeo, clothMat.clone());
+    legR.position.set(0.2, -1.0, 0);
+    legR.castShadow = true;
     group.add(legR);
 
-    // Health bar (billboard)
+    // Feet
+    const footGeo = new THREE.BoxGeometry(0.24, 0.14, 0.32);
+    const footL = new THREE.Mesh(
+      footGeo,
+      new THREE.MeshLambertMaterial({ color: 0x1a0a00 }),
+    );
+    footL.position.set(-0.2, -1.5, 0.05);
+    group.add(footL);
+    const footR = footL.clone();
+    footR.position.set(0.2, -1.5, 0.05);
+    group.add(footR);
+
+    // Health bar
     const hbBg = new THREE.Mesh(
       new THREE.PlaneGeometry(0.9, 0.1),
       this.hbBgMat.clone(),
@@ -104,9 +174,8 @@ export class EnemySystem {
       new THREE.PlaneGeometry(0.9, 0.1),
       new THREE.MeshBasicMaterial({ color: 0x22c55e }),
     );
-    hbBg.position.set(0, 1.5, 0);
-    hbFg.position.set(0, 1.5, 0.001);
-    hbFg.scale.x = 1;
+    hbBg.position.set(0, 1.65, 0);
+    hbFg.position.set(0, 1.65, 0.001);
     group.add(hbBg, hbFg);
 
     this.scene.add(group);
@@ -119,7 +188,10 @@ export class EnemySystem {
       armR,
       legL,
       legR,
+      eyeL,
+      eyeR,
       hbFg,
+      hbBgMesh: hbBg,
       hp: config.hp,
       maxHp: config.hp,
       speed: config.speed,
@@ -131,13 +203,13 @@ export class EnemySystem {
       deathTimer: 0,
       isDying: false,
       flashTimer: 0,
+      // store base skin for flash reset
+      skinColor: skinTint.getHex(),
     };
-
     this.enemies.push(enemy);
     return enemy;
   }
 
-  // ── Update ─────────────────────────────────────────────────
   update(delta, playerPos) {
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
@@ -149,7 +221,6 @@ export class EnemySystem {
         }
         continue;
       }
-
       this._updateAI(e, delta, playerPos);
       this._updateAnimation(e, delta);
       this._updateHealthBar(e, playerPos);
@@ -159,34 +230,25 @@ export class EnemySystem {
 
   _updateAI(e, delta, playerPos) {
     const pos = e.group.position;
-
-    // Direction to player
     const toPlayer = new THREE.Vector3(
       playerPos.x - pos.x,
       0,
       playerPos.z - pos.z,
     );
     const dist = toPlayer.length();
-
     if (dist < 0.1) return;
     toPlayer.normalize();
+    // Manual yaw-only rotation — lookAt can flip the up-vector causing enemies to go upside down
+    const targetYaw = Math.atan2(playerPos.x - pos.x, playerPos.z - pos.z);
+    e.group.rotation.set(0, targetYaw, 0);
 
-    // Face player
-    e.group.lookAt(playerPos.x, pos.y, playerPos.z);
-
-    // Gravity
     e.velocity.y += -22 * delta;
-
-    // Move toward player (stop at attack range)
     if (dist > ATTACK_RANGE - 0.3) {
-      // Obstacle avoidance: try slight angles if directly blocked
-      const moveVec = toPlayer.clone().multiplyScalar(e.speed * delta);
-      pos.x += moveVec.x;
-      pos.z += moveVec.z;
+      pos.x += toPlayer.x * e.speed * delta;
+      pos.z += toPlayer.z * e.speed * delta;
       this._resolveEnemyCollisions(e, pos);
     }
 
-    // Vertical
     pos.y += e.velocity.y * delta;
     const gy =
       (window._sceneManager?.getTerrainHeight(pos.x, pos.z) ?? 0) +
@@ -197,12 +259,10 @@ export class EnemySystem {
       e.onGround = true;
     }
 
-    // Attack
     if (dist <= ATTACK_RANGE) {
       e.attackTimer -= delta;
       if (e.attackTimer <= 0) {
         e.attackTimer = 1 / ATTACK_RATE;
-        // Notify player (handled externally via reference)
         if (window._player && !window._player.isDead) {
           window._player.takeDamage(ATTACK_DAMAGE);
         }
@@ -217,14 +277,12 @@ export class EnemySystem {
       if (pos.x + half < b.min.x || pos.x - half > b.max.x) continue;
       if (pos.z + half < b.min.z || pos.z - half > b.max.z) continue;
       if (pos.y < b.min.y - ENEMY_HEIGHT || pos.y > b.max.y + 1) continue;
-
-      const ox1 = pos.x + half - b.min.x;
-      const ox2 = b.max.x - (pos.x - half);
-      const oz1 = pos.z + half - b.min.z;
-      const oz2 = b.max.z - (pos.z - half);
-      const ox = Math.min(ox1, ox2);
-      const oz = Math.min(oz1, oz2);
-
+      const ox1 = pos.x + half - b.min.x,
+        ox2 = b.max.x - (pos.x - half);
+      const oz1 = pos.z + half - b.min.z,
+        oz2 = b.max.z - (pos.z - half);
+      const ox = Math.min(ox1, ox2),
+        oz = Math.min(oz1, oz2);
       if (ox < oz) {
         pos.x += ox1 < ox2 ? -ox : ox;
       } else {
@@ -241,43 +299,37 @@ export class EnemySystem {
     const moving = dist > ATTACK_RANGE;
 
     if (moving) {
-      e.animTime += delta * e.speed * 2.5;
-      const swing = Math.sin(e.animTime) * 0.5;
-      e.armL.rotation.x = swing;
-      e.armR.rotation.x = -swing;
+      // Zombie shamble: uneven, lurching gait
+      e.animTime += delta * e.speed * 2.0;
+      const swing = Math.sin(e.animTime) * 0.6;
+      const lurch = Math.abs(Math.sin(e.animTime * 0.5)) * 0.15;
       e.legL.rotation.x = -swing;
       e.legR.rotation.x = swing;
+      e.armL.rotation.x = -0.8 + swing * 0.3;
+      e.armR.rotation.x = -0.8 - swing * 0.3;
+      // Body sway on the body mesh only, never on the group (would fight yaw)
+      e.body.rotation.z = Math.sin(e.animTime * 0.7) * 0.05;
     } else {
-      // Attack animation
-      e.animTime += delta * 8;
-      const swing = Math.sin(e.animTime) * 0.3;
-      e.armL.rotation.x = swing - 0.3;
-      e.armR.rotation.x = swing - 0.3;
+      // Attack lunge animation
+      e.animTime += delta * 10;
+      const lunge = Math.sin(e.animTime) * 0.4;
+      e.armL.rotation.x = -1.2 + lunge;
+      e.armR.rotation.x = -1.2 + lunge;
       e.legL.rotation.x = 0;
       e.legR.rotation.x = 0;
+      e.body.rotation.z = 0;
     }
   }
 
   _updateHealthBar(e, playerPos) {
-    // Billboard toward camera
-    const pos = e.group.position;
-    e.group.children.forEach((c) => {
-      if (c === e.hbFg || c.material === this.hbBgMat) {
-        if (window._sceneManager) {
-          const cam = window._sceneManager.camera ?? window._player?.camera;
-          if (cam) {
-            c.lookAt(cam.position);
-          }
-        }
-      }
-    });
-
-    // Update health bar width
+    const cam = window._sceneManager?.camera ?? window._player?.camera;
+    if (cam) {
+      e.hbFg.lookAt(cam.position);
+      e.hbBgMesh.lookAt(cam.position);
+    }
     const frac = e.hp / e.maxHp;
     e.hbFg.scale.x = Math.max(0, frac);
     e.hbFg.position.x = (frac - 1) * 0.45;
-
-    // Color based on HP
     if (frac > 0.5) e.hbFg.material.color.setHex(0x22c55e);
     else if (frac > 0.25) e.hbFg.material.color.setHex(0xf59e0b);
     else e.hbFg.material.color.setHex(0xef4444);
@@ -286,18 +338,28 @@ export class EnemySystem {
   _updateFlash(e, delta) {
     if (e.flashTimer > 0) {
       e.flashTimer -= delta;
-      const c = e.flashTimer > 0 ? 0xffffff : 0x2d4a1e;
-      e.body.material.color.setHex(c);
-      e.head.material.color.setHex(e.flashTimer > 0 ? 0xffffff : 0xc68642);
+      const flash = e.flashTimer > 0;
+      e.body.material.color.setHex(flash ? 0xffffff : 0x2a1a0a);
+      e.head.material.color.setHex(flash ? 0xffffff : e.skinColor);
     }
   }
 
   _updateDeath(e, delta) {
+    // On first death frame, snapshot yaw and clear any animation tilts
+    if (!e._deathSnapped) {
+      e._deathSnapped = true;
+      e._deathYaw = e.group.rotation.y;
+      e.group.rotation.set(0, e._deathYaw, 0);
+      e.body.rotation.x = 0;
+    }
     e.deathTimer += delta;
-    // Fall over
-    e.group.rotation.x = Math.min(e.group.rotation.x + delta * 3, Math.PI / 2);
-    e.group.position.y -= delta * 1.5;
-    // Fade
+    // Fall forward (X: 0 → PI/2) preserving original yaw, no Z roll
+    const fallAngle = Math.min(
+      (e.deathTimer / 0.5) * (Math.PI / 2),
+      Math.PI / 2,
+    );
+    e.group.rotation.set(fallAngle, e._deathYaw, 0);
+    e.group.position.y -= delta * 1.2;
     const opacity = Math.max(0, 1 - e.deathTimer);
     e.group.traverse((c) => {
       if (c.material) {
@@ -307,7 +369,6 @@ export class EnemySystem {
     });
   }
 
-  // ── Damage ─────────────────────────────────────────────────
   hitEnemy(enemy, damage) {
     if (!enemy.isAlive) return false;
     enemy.hp -= damage;
@@ -315,30 +376,25 @@ export class EnemySystem {
     if (enemy.hp <= 0) {
       enemy.isAlive = false;
       enemy.isDying = true;
-      return true; // killed
+      enemy.deathTimer = 0; // ensure snapshot triggers on first _updateDeath call
+      return true;
     }
     return false;
   }
 
-  // ── Raycasting (for shooting) ──────────────────────────────
   raycastEnemies(origin, direction) {
-    // Returns { enemy, point, distance } or null
     const ray = new THREE.Ray(origin, direction.clone().normalize());
-    let best = null;
-    let bestDist = Infinity;
-
+    let best = null,
+      bestDist = Infinity;
     for (const e of this.enemies) {
       if (!e.isAlive) continue;
       const pos = e.group.position;
-
-      // Sphere test (fast)
       const toCenter = pos.clone().sub(origin);
       const tca = toCenter.dot(direction);
       if (tca < 0) continue;
       const d2 = toCenter.lengthSq() - tca * tca;
-      const r2 = 0.9 * 0.9; // enemy hit radius
+      const r2 = 0.9 * 0.9;
       if (d2 > r2) continue;
-
       const dist = tca - Math.sqrt(r2 - d2);
       if (dist < bestDist) {
         bestDist = dist;
@@ -355,11 +411,8 @@ export class EnemySystem {
   getAliveCount() {
     return this.enemies.filter((e) => e.isAlive).length;
   }
-
   clearAll() {
-    for (const e of this.enemies) {
-      this.scene.remove(e.group);
-    }
+    for (const e of this.enemies) this.scene.remove(e.group);
     this.enemies = [];
   }
 }
