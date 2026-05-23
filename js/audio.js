@@ -28,6 +28,7 @@ const SOUND_DEFS = {
   },
   wave_start: { src: "sounds/wave_start.wav", volume: 0.7, maxInstances: 1 },
   wave_clear: { src: "sounds/wave_clear.wav", volume: 0.75, maxInstances: 1 },
+  ammo_pickup: { src: "sounds/ammo_pickup.wav", volume: 0.65, maxInstances: 2 },
   // Separate footstep sounds for walk vs sprint
   // Supply sounds/footstep_walk.wav and sounds/footstep_sprint.wav in your sounds/ folder.
   // If only one file exists, point both src entries at the same file and adjust volume.

@@ -167,7 +167,7 @@ export class WaveManager {
         pack.collect();
         this._ammoPacks.splice(i, 1);
         if (window._shootingSystem) window._shootingSystem.giveAmmo();
-        this.audio?.play("wave_clear");
+        this.audio?.play("ammo_pickup");
       }
     }
 
