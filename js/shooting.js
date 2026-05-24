@@ -86,6 +86,20 @@ export class ShootingSystem {
     this.player = player;
     this.enemySystem = enemySystem;
 
+    // ── Initialize ammo state FIRST before anything else ──────
+    this.currentWeaponKey = "assault_rifle";
+    this.ammoState = {};
+    for (const [key, def] of Object.entries(WEAPONS)) {
+      this.ammoState[key] = {
+        ammo: def.magSize,
+        reserve: def.reserveMax,
+        isReloading: false,
+        reloadTimer: 0,
+        fireTimer: 0,
+      };
+    }
+
+    // ── Weapon scene & camera ──────────────────────────────────
     this.weaponScene = new THREE.Scene();
     this.weaponScene.add(new THREE.AmbientLight(0xffffff, 0.9));
     const wLight = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -108,19 +122,7 @@ export class ShootingSystem {
     this.onKill = null;
     this.audio = null;
 
-    this.currentWeaponKey = "assault_rifle";
     this.weaponModels = {};
-    this.pickupState = {};
-
-    for (const [key, def] of Object.entries(WEAPONS)) {
-      this.ammoState[key] = {
-        ammo: def.magSize,
-        reserve: def.reserveMax,
-        isReloading: false,
-        reloadTimer: 0,
-        fireTimer: 0,
-      };
-    }
 
     this._gunRecoil = 0;
     this._flashTimer = 0;
@@ -165,14 +167,12 @@ export class ShootingSystem {
 
   // ── Give ammo (called by ammo pack pickup) ─────────────────
   giveAmmo() {
-    // Refill all weapons proportionally
     for (const [key, def] of Object.entries(WEAPONS)) {
       const st = this.ammoState[key];
-      const refill = Math.floor(def.reserveMax * 0.4); // 40% of max reserve
+      const refill = Math.floor(def.reserveMax * 0.4);
       st.reserve = Math.min(st.reserve + refill, def.reserveMax);
     }
     this._updateAmmoUI();
-    // Flash ammo display
     const el = document.getElementById("ammo-value");
     if (el) {
       el.style.color = "#22c55e";
