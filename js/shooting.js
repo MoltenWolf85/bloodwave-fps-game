@@ -110,7 +110,7 @@ export class ShootingSystem {
 
     this.currentWeaponKey = "assault_rifle";
     this.weaponModels = {};
-    this.ammoState = {};
+    this.pickupState = {};
 
     for (const [key, def] of Object.entries(WEAPONS)) {
       this.ammoState[key] = {
