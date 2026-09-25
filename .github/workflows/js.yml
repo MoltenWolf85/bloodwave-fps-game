@@ -1,0 +1,49 @@
+name: js Folder Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # CRITICAL FIX: Grants the workflow write access to push commits and create releases
+    permissions:
+      contents: write
+
+    steps:
+      # UPGRADED: v4 removes the Node.js deprecation warning
+      - name: Checkout repo (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Enable sparse checkout
+        run: |
+          git sparse-checkout init --cone
+          git sparse-checkout set js
+
+      - name: Commit js-only tree
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Keep only js folder" || echo "No changes to commit"
+
+      - name: Push to js-only branch
+        run: |
+          git push origin HEAD:js-only
+
+      - name: Zip js folder
+        run: zip -r js.zip js
+
+      # UPGRADED: Uses v2 for up-to-date environments
+      - name: Create release with zip
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: js-v1.0
+          name: js Folder Release
+          body: |
+            This release contains only the `js` folder from the original repo.
+          files: dist.zip # FIX: Matches the file name zipped in the previous step
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
